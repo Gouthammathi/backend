@@ -9,3 +9,4 @@ chromadb
 langchain-community
 langchain-huggingface
 python-dotenv
+openai
