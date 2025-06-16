@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+pypdf
+langchain
+transformers
+torch
+chromadb
+langchain-community
+langchain-huggingface
+python-dotenv
