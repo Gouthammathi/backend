@@ -9,16 +9,21 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import tempfile, os, re, openai
 
-# Load API key
+# Load .env with TOGETHER_API_KEY
 load_dotenv()
 openai.api_key = os.getenv("TOGETHER_API_KEY")
 openai.api_base = "https://api.together.xyz/v1"
 
 app = FastAPI()
- 
+
+# ✅ Allow your deployed frontend domain
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "https://frontend-kappa-one-91.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:3001"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,7 +37,7 @@ user_info = {}
 def root():
     return {"message": "🚀 Resume Chat API is running"}
 
-# Extract name/email/phone
+# Extract personal info from resume
 def extract_personal_info(text: str):
     info = {
         "name": None,
@@ -44,7 +49,7 @@ def extract_personal_info(text: str):
     if lines:
         info["name"] = lines[0].strip()
 
-    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+", text)
     if email_match:
         info["email"] = email_match.group()
 
@@ -64,10 +69,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         loader = PyPDFLoader(tmp_path)
         documents = loader.load()
 
+        # Extract plain text
         resume_text = "\n".join([doc.page_content for doc in documents])
         global user_info
         user_info = extract_personal_info(resume_text)
 
+        # Split & embed
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         chunks = splitter.split_documents(documents)
 
@@ -81,6 +88,7 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         os.remove(tmp_path)
 
+        # Personalized greeting
         greeting = "👋 Hello"
         if user_info.get("name"):
             greeting += f" {user_info['name']}"
@@ -102,14 +110,13 @@ async def chat(request: Request):
 
         question_lower = question.lower()
 
+        # Handle basic questions
         if "your name" in question_lower or "my name" in question_lower:
             if user_info.get("name"):
                 return StreamingResponse(iter([f"data: Your name is {user_info['name']}\n\n"]), media_type="text/event-stream")
-
         if "email" in question_lower or "mail" in question_lower:
             if user_info.get("email"):
                 return StreamingResponse(iter([f"data: Your email is {user_info['email']}\n\n"]), media_type="text/event-stream")
-
         if "phone" in question_lower or "mobile" in question_lower:
             if user_info.get("phone"):
                 return StreamingResponse(iter([f"data: Your phone number is {user_info['phone']}\n\n"]), media_type="text/event-stream")
