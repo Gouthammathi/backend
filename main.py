@@ -19,7 +19,7 @@ app = FastAPI()
 # ✅ Allow only your deployed frontend domain
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://frontend-kappa-one-91.vercel.app"],
+    allow_origins=["http://localhost:3001", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +32,10 @@ user_info = {}
 @app.get("/")
 def root():
     return {"message": "🚀 Resume Chat API is running"}
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "message": "Server is running"}
 
 # Extract personal info from resume
 def extract_personal_info(text: str):
@@ -157,7 +161,11 @@ async def score_fit(payload: ScoreRequest):
 
         global vectorstore
         if not vectorstore:
+            print("[score error] Vectorstore is None - Resume not uploaded")
             return JSONResponse(status_code=500, content={"error": "Resume not uploaded yet."})
+
+        print("[score debug] API Key:", openai.api_key[:10] + "..." if openai.api_key else "Not set")
+        print("[score debug] API Base:", openai.api_base)
 
         docs = vectorstore.similarity_search(job_description, k=5)
         resume_text = "\n\n".join([doc.page_content for doc in docs])
@@ -174,12 +182,14 @@ Job Description:
 Respond only with a number between 0 and 100.
 """
 
+        print("[score debug] Sending request to Together API...")
         response = openai.ChatCompletion.create(
             model="mistralai/Mistral-7B-Instruct-v0.2",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0.2
         )
+        print("[score debug] Received response from Together API")
 
         score_text = response.choices[0].message["content"]
         score = int(re.search(r"\d{1,3}", score_text).group())
@@ -187,5 +197,8 @@ Respond only with a number between 0 and 100.
         return {"score": score}
 
     except Exception as e:
-        print("[score error]", e)
+        print("[score error] Full error:", str(e))
+        print("[score error] Error type:", type(e).__name__)
+        import traceback
+        print("[score error] Traceback:", traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
