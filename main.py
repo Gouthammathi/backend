@@ -16,14 +16,10 @@ openai.api_base = "https://api.together.xyz/v1"
 
 app = FastAPI()
 
-# ✅ Allow your deployed frontend domain
+# ✅ Allow only your deployed frontend domain
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://frontend-kappa-one-91.vercel.app",
-        "http://localhost:3000",
-        "http://localhost:3001"
-    ],
+    allow_origins=["https://frontend-kappa-one-91.vercel.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,19 +40,15 @@ def extract_personal_info(text: str):
         "email": None,
         "phone": None,
     }
-
     lines = text.strip().split("\n")
     if lines:
         info["name"] = lines[0].strip()
-
-    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+", text)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
     if email_match:
         info["email"] = email_match.group()
-
     phone_match = re.search(r"(\+?\d[\d\-\s]{8,}\d)", text)
     if phone_match:
         info["phone"] = phone_match.group()
-
     return info
 
 @app.post("/upload")
@@ -68,13 +60,11 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         loader = PyPDFLoader(tmp_path)
         documents = loader.load()
-
-        # Extract plain text
         resume_text = "\n".join([doc.page_content for doc in documents])
+
         global user_info
         user_info = extract_personal_info(resume_text)
 
-        # Split & embed
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         chunks = splitter.split_documents(documents)
 
@@ -88,7 +78,6 @@ async def upload_pdf(file: UploadFile = File(...)):
 
         os.remove(tmp_path)
 
-        # Personalized greeting
         greeting = "👋 Hello"
         if user_info.get("name"):
             greeting += f" {user_info['name']}"
@@ -109,8 +98,6 @@ async def chat(request: Request):
             return JSONResponse(status_code=400, content={"error": "Message required."})
 
         question_lower = question.lower()
-
-        # Handle basic questions
         if "your name" in question_lower or "my name" in question_lower:
             if user_info.get("name"):
                 return StreamingResponse(iter([f"data: Your name is {user_info['name']}\n\n"]), media_type="text/event-stream")
@@ -158,7 +145,6 @@ async def chat(request: Request):
         print("[/chat error]", e)
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-# Role-fit score logic
 class ScoreRequest(BaseModel):
     job_description: str
 
@@ -172,6 +158,7 @@ async def score_fit(payload: ScoreRequest):
         global vectorstore
         if not vectorstore:
             return JSONResponse(status_code=500, content={"error": "Resume not uploaded yet."})
+
         docs = vectorstore.similarity_search(job_description, k=5)
         resume_text = "\n\n".join([doc.page_content for doc in docs])
 
