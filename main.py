@@ -7,7 +7,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import tempfile, os, re, openai
+import tempfile, os, re, openai, traceback
 
 # Load .env with TOGETHER_API_KEY
 load_dotenv()
@@ -47,10 +47,10 @@ def extract_personal_info(text: str):
     lines = text.strip().split("\n")
     if lines:
         info["name"] = lines[0].strip()
-    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
+    email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+", text)
     if email_match:
         info["email"] = email_match.group()
-    phone_match = re.search(r"(\+?\d[\d\-\s]{8,}\d)", text)
+    phone_match = re.search(r"(\\+?\\d[\\d\\-\\s]{8,}\\d)", text)
     if phone_match:
         info["phone"] = phone_match.group()
     return info
@@ -58,16 +58,23 @@ def extract_personal_info(text: str):
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     try:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        print(f"[UPLOAD] Received file: {file.filename}")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
 
+        print(f"[UPLOAD] Temporary file saved at: {tmp_path}")
+
         loader = PyPDFLoader(tmp_path)
         documents = loader.load()
+        print(f"[UPLOAD] Loaded {len(documents)} pages.")
+
         resume_text = "\n".join([doc.page_content for doc in documents])
 
         global user_info
         user_info = extract_personal_info(resume_text)
+        print(f"[UPLOAD] Extracted info: {user_info}")
 
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         chunks = splitter.split_documents(documents)
@@ -81,6 +88,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         vectorstore = Chroma.from_documents(chunks, embedding, persist_directory=VECTOR_DB_PATH)
 
         os.remove(tmp_path)
+        print("[UPLOAD] Temporary file removed.")
 
         greeting = "👋 Hello"
         if user_info.get("name"):
@@ -90,6 +98,7 @@ async def upload_pdf(file: UploadFile = File(...)):
         return {"message": greeting}
 
     except Exception as e:
+        print("[UPLOAD ERROR]", traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/chat")
@@ -140,13 +149,13 @@ async def chat(request: Request):
                     if content:
                         yield f"data: {content}\n\n"
             except Exception as e:
-                print("[streaming error]", e)
+                print("[streaming error]", traceback.format_exc())
                 yield f"data: ERROR: {str(e)}\n\n"
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 
     except Exception as e:
-        print("[/chat error]", e)
+        print("[/chat error]", traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 class ScoreRequest(BaseModel):
@@ -164,9 +173,6 @@ async def score_fit(payload: ScoreRequest):
             print("[score error] Vectorstore is None - Resume not uploaded")
             return JSONResponse(status_code=500, content={"error": "Resume not uploaded yet."})
 
-        print("[score debug] API Key:", openai.api_key[:10] + "..." if openai.api_key else "Not set")
-        print("[score debug] API Base:", openai.api_base)
-
         docs = vectorstore.similarity_search(job_description, k=5)
         resume_text = "\n\n".join([doc.page_content for doc in docs])
 
@@ -182,14 +188,12 @@ Job Description:
 Respond only with a number between 0 and 100.
 """
 
-        print("[score debug] Sending request to Together API...")
         response = openai.ChatCompletion.create(
             model="mistralai/Mistral-7B-Instruct-v0.2",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             temperature=0.2
         )
-        print("[score debug] Received response from Together API")
 
         score_text = response.choices[0].message["content"]
         score = int(re.search(r"\d{1,3}", score_text).group())
@@ -199,6 +203,5 @@ Respond only with a number between 0 and 100.
     except Exception as e:
         print("[score error] Full error:", str(e))
         print("[score error] Error type:", type(e).__name__)
-        import traceback
         print("[score error] Traceback:", traceback.format_exc())
         return JSONResponse(status_code=500, content={"error": str(e)})
